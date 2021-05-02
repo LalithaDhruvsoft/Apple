@@ -1,0 +1,490 @@
+trigger workOrderBeforeEvents  on WorkOrder (before update,before insert) {
+    MakeReady_Library.initQMap();
+    workOrderLibrary.getWorkType();
+    workOrderLibrary.initRecordTypes();
+    if(trigger.isUpdate){
+        set<id> makeReadyIds=new set<id>();
+        map<id,Make_Ready__C> makeReadymap=new map<id,Make_Ready__C>();
+        set<id> pricingReviewpendingMRs=new set<id>();
+        set<id> completedWOs=new set<id>();
+        set<id> pendingSAWOs=new set<id>();
+        set<id> pendingWoliWOs=new set<id>();
+        set<id> faileMIRWithoutSubStatus=new set<id>();
+        set<id> canceledWoSet=new set<id>();
+        set<id> inprogressSAParentIds=new set<id>();
+        set<id> leadTimeItemPendingWolis=new set<id>();
+        Map<Id, WorkOrder> rejectedWorkOrders = new Map<Id, WorkOrder>{};
+            set<id> photovalidationset=new Set<id>(); 
+        set<id> itRequestSentWithPhotoSet =new Set<id>();    
+        //set<id> offerLetterSentCompletedSet=new Set<id>();
+        //set<id> offerLetterSentWithPhotoSet=new Set<id>();
+        
+        for(WorkOrder wo: Trigger.new){
+            if(wo.Record_Type_Name__c=='Construction' && wo.Project_Status__c=='100%' && Trigger.oldMap.get(wo.id).Project_Status__c!='100%'){wo.Status='Completed';}
+            /*if(wo.Phase_in_Approval__c!=Trigger.oldMap.get(wo.id).Phase_in_Approval__c && wo.Market__c!=null && wo.Record_Type_Name__c=='Construction'){
+//wo.OwnerId=wo.Phase_in_Approval__c>0 && MakeReady_Library.qMap.containsKey(wo.Market__c+' Market Const Mgr' )? MakeReady_Library.qMap.get(wo.Market__c+' Market Const Mgr' ):wo.Phase_in_Approval__c==0 && MakeReady_Library.qMap.containsKey(wo.Market__c+' Construction Project Mgr' )?MakeReady_Library.qMap.get(wo.Market__c+' Construction Project Mgr' ):wo.OwnerId;
+}*/
+            if(wo.Record_Type_Name__c=='Disposition Offer' && wo.Recommendation__c!=null && wo.Recommendation__c!=Trigger.oldMap.get(wo.id).Recommendation__c && wo.status!='Accepted' && wo.status!='Rejected'){
+                if(wo.Recommendation__c=='Reject'){wo.status='Rejected';}
+                else{wo.status='Pending Approval';}
+            }
+            if(wo.Work_Type__c=='Collection Letters' && (wo.Subject.Contains('AR Occ Ins-' ) || wo.Subject.Contains('AR Abandonment-')) && wo.SubStatus__c!=null && Trigger.oldMap.get(wo.id).SubStatus__c!=wo.SubStatus__c && wo.serviceappointmentcount ==0){
+                if(wo.Substatus__c=='Occupied'){wo.ownerId=MakeReady_Library.qMap.get('AR Queue');}
+                else{wo.ownerId=MakeReady_Library.qMap.get(wo.Market__c+' Market Manager');}
+            }
+            if(wo.Make_Ready__c!=null && (wo.status == 'Passed' || wo.status == 'Failed' || (wo.status == 'Completed' && wo.Record_Type_Name__c=='Completed') || (wo.Status=='Completed' && wo.Work_Type__c=='Yardi Update'))&& Trigger.oldmap.get(wo.Id).Status != wo.status){
+                makeReadyIds.add(wo.Make_Ready__c);
+            }
+            if((wo.status == 'Completed' || wo.status == 'Passed' || wo.status == 'Failed' || wo.Status=='Closed' || wo.Status=='Cannot Complete' || wo.status=='Submit for Approval') && Trigger.oldmap.get(wo.Id).Status != wo.status){
+                completedWOs.add(wo.id);
+            }
+            string oldWOStatus=Trigger.oldmap.get(wo.Id).Status;
+            if ((oldWOStatus== 'Completed' || (oldWOStatus=='Cannot Complete' && wo.status!='Scheduled') || oldWOStatus=='Canceled' || oldWOStatus=='Failed' || oldWOStatus=='Passed' || oldWOStatus=='Not Applicable' || oldWOStatus=='Rejected' || oldWOStatus=='Approved' || oldWOStatus=='Accepted') && !FeatureManagement.checkPermission(Label.ModifyClosedWorkOrder) ) {
+                boolean showError=true;
+                if((wo.Status=='Failed' && wo.subStatus__C=='YU Failure') || (wo.Work_Type__c=='Estimate' && wo.status=='In Progress') || (wo.Work_Type__c=='Construction Extension' && wo.status=='In Progress')){
+                    showError=false;
+                }
+                if(showError){
+                    wo.addError('You are not allowed to modify the '+oldWOStatus+' Work Order');
+                }
+            }
+            if(wo.status == 'Failed' || wo.status == 'Canceled'){
+                canceledWoSet.add(wo.id);
+            }
+            if( wo.Work_Type__c=='Estimate' && wo.Market__c!=null &&  wo.status=='Submit for Approval' && Trigger.oldMap.get(wo.id).status!=wo.status){
+                string QName = wo.Market__c + ' ' + MR_CS__c.getInstance(MR_CS__c.getInstance('Make_Ready_Create_Estimate').MR_Next_Task__c).Rehab_QName__c;
+                wo.OwnerId=MakeReady_Library.qMap.get(QName);
+                wo.Create_Estimate_End_Date__c=date.today();
+            }
+            if( wo.Work_Type__c=='Conditional Assessment' && wo.Market__c!=null &&  wo.status=='Submit for Approval' && Trigger.oldMap.get(wo.id).status!=wo.status){
+                wo.OwnerId=MakeReady_Library.qMap.get(wo.Market__c + ' ' + MO_CS__c.getInstance('Conditional Assessment Approval').QName__c);
+                wo.Approval_Due_Date__c=Date.today() + MO_CS__c.getInstance('Conditional Assessment Approval').Due_Date__c.intValue();
+            }
+            if( wo.Work_Type__c=='Estimate' && wo.Market__c!=null &&  wo.status=='In Progress' && Trigger.oldMap.get(wo.id).status=='Sent for Approval'){
+                string QName = wo.Market__c + ' ' + MR_CS__c.getInstance('Make_Ready_Create_Estimate').Rehab_QName__c;
+                wo.OwnerId=MakeReady_Library.qMap.get(QName);
+            }
+            if(wo.Work_Type__c=='Pre-Closing Inspection' && (Trigger.oldMap.get(wo.id).Closing_Date_Confirmed__c!=wo.Closing_Date_Confirmed__c || Trigger.oldMap.get(wo.id).PCI_Required__C!=wo.PCI_Required__C)){
+                if(Trigger.oldMap.get(wo.id).Closing_Date_Confirmed__c!=wo.Closing_Date_Confirmed__c){
+                    wo.status=wo.Closing_Date_Confirmed__c==true?'In Progress':'Pending Closing Date';
+                }
+                //if(Trigger.oldMap.get(wo.id).PCI_Required__C!=wo.PCI_Required__C && wo.PCI_Required__C==true){
+                //wo.WorkTypeId=workOrderLibrary.workTypeMap.containskey(wo.Work_Type__c)?workOrderLibrary.workTypeMap.get(wo.Work_Type__c):null;
+                //}
+            }
+            
+            if((wo.Record_Type_Name__c=='Disposition Offer' || wo.Record_Type_Name__c=='Marketing Assessment') && wo.status=='Rejected' && wo.status!=trigger.oldMap.get(wo.id).status){
+                rejectedWorkOrders.put(wo.id,wo);
+            }
+            /*if(string.isNotBlank(wo.Record_Type_Name__c) && wo.Record_Type_Name__c.contains('Resident Maintenance Request') && Trigger.oldMap.get(wo.id).vendor__C!=wo.Vendor__c){
+if(wo.Vendor__c!=null){wo.RecordTypeId=workOrderLibrary.workOrderRecTypes.get('Resident Maintenance Request Vendor');}
+else{wo.RecordTypeId=workOrderLibrary.workOrderRecTypes.get('Resident Maintenance Request');}
+}
+if(wo.WorkTypeId==null && wo.Vendor__c==null && wo.Status=='Pending Schedule' && Trigger.oldMap.get(wo.id).Status!=wo.Status && wo.work_type__c=='Resident Maintenance Request'){
+wo.WorktypeId=workOrderLibrary.workTypeMap.get(wo.work_type__c);wo.Duration=1;
+}*/
+            //if(wo.work_type__c=='Offer Letter' && wo.Status=='Completed' && wo.SubStatus__c=='Accepted' && wo.Status!=Trigger.oldMap.get(wo.id).status && wo.Photo__c==true && wo.CaseID!=null ){offerLetterSentCompletedSet.add(wo.id);}
+            if(wo.work_type__c=='IT Request' && (wo.Status!='New' || wo.Status!='Canceled') && wo.Status!=Trigger.oldMap.get(wo.id).status && wo.CaseID!=null && wo.Record_Type_Name__c=='IT Request'){photovalidationset.add(wo.id);}
+        }
+        /*if(!offerLetterSentCompletedSet.isEmpty()){
+for(ContentDocumentLink CDL:[SELECT ContentDocumentId,Id,LinkedEntityId 
+FROM ContentDocumentLink WHERE LinkedEntityId in:offerLetterSentCompletedSet]){
+offerLetterSentWithPhotoSet.add(CDL.LinkedEntityId);
+}
+}*/
+        if(!photovalidationset.isEmpty()){
+            for(ContentDocumentLink CDL:[SELECT ContentDocumentId,Id,LinkedEntityId 
+                                         FROM ContentDocumentLink WHERE LinkedEntityId in:photovalidationset]){
+                                             itRequestSentWithPhotoSet.add(CDL.LinkedEntityId);
+                                         }
+        }
+        if(!canceledWoSet.isEmpty()){
+            for(ServiceAppointment sa:[select ParentRecordid from serviceAppointment where status='In Progress' and parentRecordId in:canceledWoSet ]){
+                inprogressSAParentIds.add(sa.ParentRecordid);
+            }
+        }
+        
+        if(!makeReadyIds.isEmpty()){
+            for(Make_Ready__C mr:[select id,Type__c,Name,(select id,status,recordType.Name from Work_Orders__r) from Make_Ready__C where id in :makeReadyIds]){
+                makeReadymap.put(mr.id,mr);
+                if(!mr.Work_Orders__r.isEmpty()){
+                    for(WorkOrder wo:mr.Work_Orders__r){
+                        if(wo.status!='Completed' &&  wo.recordType.Name=='Pricing Review'){
+                            pricingReviewpendingMRs.add(mr.id);
+                        }
+                        else if(wo.Status!='Completed' && wo.Status!='Canceled' && wo.recordtype.name.EndsWith('Lead Time Item')){
+                            leadTimeItemPendingWolis.add(mr.id);
+                        }
+                    }
+                }
+            }
+        }
+        if(!completedWOs.isEmpty()){
+            for(WorkOrderLineItem woli:[select id,WorkOrderId,Couriers_Needed__c from workOrderLineItem where WorkOrderId in :completedWOs and status!='Completed' and status!='Cannot Complete' and status!='Canceled' and Couriers_Needed__c!='No' and status!='Approved']){
+                pendingWoliWOs.add(woli.WorkOrderId);
+            }
+            for(ServiceAppointment sa:[select id,parentRecordId from ServiceAppointment where parentRecordId in:completedWOs and status!='Completed' and status!='Cannot Complete' and status!='Canceled']){
+                pendingSAWOs.add(sa.parentRecordId);
+            }
+        }
+        for(WorkOrder wo: Trigger.new){
+            //For Passing the End Date on Completion
+            if((wo.status=='Canceled' || wo.status=='Failed') && inprogressSAParentIds.contains(wo.id)){
+                wo.addError('Work Order cannot be '+wo.status+' with open Service Appointment');
+            }
+            if((wo.Status== 'Completed' || wo.StatusCategory== 'Completed' || wo.status=='Complete Pending MIR Inspection' || wo.status=='Complete Pending Occupancy Inspection' || wo.StatusCategory=='Closed' || wo.StatusCategory=='CannotComplete' || wo.StatusCategory== 'Canceled') && wo.status!=Trigger.oldMap.get(wo.id).status ){
+                wo.EndDate=datetime.now();
+                if(wo.WOrk_Type__c=='Renewal' && (wo.Ok_to_Renew__c || wo.Non_Renewal_Notice_Date__c==date.today())){wo.Renewal_Email_Sent__c=true;}
+            }
+            //Checking Inspection Estimate Amount is entered on Completion 
+            if((wo.Record_Type_Name__c=='Pre-Acq Inspection' || wo.Record_Type_Name__c=='Offer Inspection') && wo.Inspection_Estimate_Amount__c==null && wo.Status=='Completed' ){
+                wo.Inspection_Estimate_Amount__c.addError('Inspection Estimate Amount is required to complete the Inspection');
+            }
+            
+            if(wo.Work_Type__C == 'Construction' && wo.Status == 'Completed' && wo.Record_Type_Name__c=='Construction' && Trigger.oldMap.get(wo.Id).Status != wo.Status && leadTimeItemPendingWolis.contains(wo.Make_Ready__c)){
+                wo.addError('All Lead Time Item WorkOrders should be completed for completing this WorkOrder');
+            }
+            if((wo.status == 'Completed' || wo.status == 'Passed' || wo.status == 'Failed' || wo.Status=='Closed' || wo.Status=='Cannot Complete' || wo.status=='Submit for Approval') && Trigger.oldMap.get(wo.id).Status!=wo.Status ){
+                if(pendingWoliWOs.contains(wo.id) || pendingSAWOs.contains(wo.id)){
+                    if(pendingWoliWOs.contains(wo.id) && pendingSAWOs.contains(wo.id)){
+                        wo.addError('Work Order Line Item(s) and Service Appointment(s) should be completed for completing this Work Order');
+                    }
+                    else if(pendingWoliWOs.contains(wo.id)){
+                        wo.addError('Work Order Line Item(s) should be completed for completing this Work Order');
+                    }
+                    else{
+                        wo.addError('Service Appointment(s) should be completed for completing this Work Order');
+                    }
+                }
+            }
+            if(wo.Make_Ready__C!=null && pricingReviewpendingMRs.contains(wo.Make_Ready__C) ){
+                if((wo.Record_Type_Name__c=='Yardi Update' && wo.status=='Completed') || (wo.Record_Type_Name__c=='Move In Ready Inspection' && wo.status=='Passed' && makeReadymap.get(wo.Make_Ready__c).Type__c=='Turn')){
+                    wo.addError('Pricing Review Work Order should be completed for completing this Work Order');
+                }
+            }
+            //Logic for creating the appointment for the MIR Inspection workorder which don't have appointments except for the First MIR
+            if(wo.Record_Type_Name__c=='Move In Ready Inspection' && wo.StatusCategory!='CannotComplete' && wo.StatusCategory!='Completed' && wo.StatusCategory!='Canceled' && 
+               WO.Service_Appointment_Required__c!=Trigger.oldMap.get(wo.id).Service_Appointment_Required__c && WO.Service_Appointment_Required__c==TRUE && wo.Make_Ready__C!=null){
+                   if((wo.Subject.SubStringAfter('-')).SubStringBefore('-')!='MIR1' && workOrderLibrary.workTypeMap.ContainsKey(wo.Record_Type_Name__c)){
+                       wo.WorktypeId=workOrderLibrary.workTypeMap.get(wo.Record_Type_Name__c);
+                   }
+               }
+            if(wo.Record_Type_Name__c=='Move In Ready Inspection' && WO.Service_Appointment_Required__c!=Trigger.oldMap.get(wo.id).Service_Appointment_Required__c 
+               && WO.Service_Appointment_Required__c==false){
+                   WO.addError('Please don\'t make the Service Appointment Required to false');
+               }  
+            
+            /*if(wo.work_type__c=='Offer Letter' && wo.Status=='Completed' && wo.SubStatus__c=='Accepted' && wo.Status!=Trigger.oldMap.get(wo.id).status 
+&& wo.Photo__c==true && wo.CaseID!=null && !offerLetterSentWithPhotoSet.contains(wo.id) ){
+WO.addError('Please upload a Photo in the Notes & Attachments section');
+}*/
+            if(wo.work_type__c=='IT Request' && (wo.Status=='Pending IT' || wo.Status=='In Progress' || wo.Status=='Completed')  
+               && wo.Status!=Trigger.oldMap.get(wo.id).status && wo.Record_Type_Name__c=='IT Request' && wo.CaseID!=null && !itRequestSentWithPhotoSet.contains(wo.id) ){
+                   WO.addError('Please upload a Photo in the Notes & Attachments section');
+               }
+            if((wo.work_type__c=='Offer Letter' && wo.Status=='Completed' && wo.Candidate_DocuSign_Status__c!= null && wo.Candidate_DocuSign_Status__c=='Delivered') || (wo.work_type__c=='Offer Letter' && wo.Status=='Completed' && wo.Candidate_DocuSign_Status__c!= null && wo.Candidate_DocuSign_Status__c=='Sent')){	
+                WO.addError('Candidate needs to accept or decline the Offer Letter first');	
+            }
+            if(wo.work_type__c=='Offer Letter' && wo.Status=='Offer Letter Sent' && wo.Manager_DocuSign_Status__c!='Completed'){
+                WO.addError('Please review the Offer Letter as the Manager needs to approve it first');   
+            }
+        }
+        if (!rejectedWorkOrders.isEmpty())  
+        {
+            // UPDATE 2/1/2014: Get the most recent approval process instance for the object.
+            // If there are some approvals to be reviewed for approval, then
+            // get the most recent process instance for each object.
+            List<Id> processInstanceIds = new List<Id>{};
+                
+                for (WorkOrder wo : [SELECT (SELECT ID
+                                             FROM ProcessInstances
+                                             ORDER BY CreatedDate DESC
+                                             LIMIT 1)
+                                     FROM WorkOrder
+                                     WHERE ID IN :rejectedWorkOrders.keySet()])
+            {
+                if(!wo.ProcessInstances.isEmpty()){processInstanceIds.add(wo.ProcessInstances[0].Id);}
+            }
+            
+            // Now that we have the most recent process instances, we can check
+            // the most recent process steps for comments.  
+            for (ProcessInstance pi : [SELECT TargetObjectId,
+                                       (SELECT Id, StepStatus, Comments 
+                                        FROM Steps
+                                        ORDER BY CreatedDate DESC
+                                        LIMIT 1 )
+                                       FROM ProcessInstance
+                                       WHERE Id IN :processInstanceIds
+                                       ORDER BY CreatedDate DESC])   
+            {                   
+                if ((pi.Steps[0].Comments == null || 
+                     pi.Steps[0].Comments.trim().length() == 0))
+                {
+                    rejectedWorkOrders.get(pi.TargetObjectId).addError(
+                        'Operation Cancelled: Please provide a rejection reason!');
+                }
+            }  
+        }
+    }
+    //For getting the RecordTypeName
+    if(trigger.isInsert){
+        workOrderLibrary.getServiceTerritory();
+        
+        set<id> uwIdSet=new set<id>();
+        map<id,Underwriting__c> underwritingMap=new map<id,Underwriting__c>();
+        set<id> makeReadySet=new set<id>();
+        map<id,string> ownerMap=new map<id,string>();
+        map<string,integer> disPositionCount=new map<string,integer>();
+        set<id> dispositionIds=new set<id>();
+        set<id> propertyIds=new set<id>();
+        map<id,Disposition__c> dispositionMap=new map<id,Disposition__c>();
+        map<id,Property__c> propertyMap=new map<id,Property__c>();
+        Map<String, Id> recordTypeMap = New Map<String, Id>();
+        
+        for(WorkOrder wo: Trigger.new){
+            if(wo.work_type__c!=null && (wo.work_type__c=='Pre-Acq Inspectiont')){wo.duration=0.5;wo.RecordTypeId=workOrderLibrary.workOrderRecTypes.get(wo.work_type__c);}
+            if(wo.work_type__c!=null && (wo.work_type__c=='Resident Maintenance Request' || wo.work_type__c=='Renewal' ||  wo.work_type__c=='Post to ATS' || wo.Work_Type__c=='Offer Letter') ){wo.duration=1;wo.RecordTypeId=workOrderLibrary.workOrderRecTypes.get(wo.work_type__c);}            /*---Logic to auto-populate Property address value in the Work order address before inserting the Work Order record---start--*/
+            if((wo.work_type__c=='Post to ATS' || wo.work_type__c=='Offer Letter' || wo.work_type__c=='BG Check' || wo.work_type__c=='Drug Screen') && workOrderLibrary.workTypeMap.containskey(wo.work_type__c)){wo.WorktypeId=workOrderLibrary.workTypeMap.get(wo.work_type__c);}
+            if(wo.work_type__c!=null && (wo.work_type__c=='Utility Renewal')){wo.RecordTypeId=workOrderLibrary.workOrderRecTypes.get(wo.work_type__c);}
+            /*if(wo.Property__c!=null &&  wo.Record_Type_Name__c!=null && wo.RecordTypeId==workOrderLibrary.workOrderRecTypes.get('Resident Maintenance Request')){
+propertyIds.add(wo.Property__c);wo.work_type__c='Resident Maintenance Request';wo.startDate=system.Now();
+}*/ 
+            /*---Logic to auto-populate Property address value in the Work order address before inserting the Work Order record---end--*/
+            
+            if(wo.Underwriting__C!=null){
+                uwIdSet.add(wo.Underwriting__C);
+            }
+            if(wo.Make_ready__C!=null){
+                makeReadySet.add(wo.Make_ready__C);
+            }
+            
+            if(wo.Disposition__c!=null){
+                dispositionIds.add(wo.Disposition__c);
+                wo.WorktypeId=workOrderLibrary.workTypeMap.get(wo.Record_Type_Name__c);
+                if(wo.Record_Type_Name__c=='Disposition Offer' && wo.Recommendation__c!=null){
+                    if(wo.Recommendation__c=='Reject'){wo.status='Rejected';}
+                    else{wo.status='Pending Approval';}
+                }
+            }
+        }
+        map<id,id> mrPropMap=new map<id,id>();
+        //set<id> uwPropSet=new set<id>();
+        map<id,datetime> createAppointmentMap=new map<id,datetime>();
+        map<id,Make_Ready__C> makeReadyMap=new map<id,Make_Ready__C>();
+        map<id,underwriting__c> uwPropMap=new map<id,Underwriting__c>();
+        //Logic for not create the CE Appointment
+        if(!makeReadySet.isEmpty()){
+            for(Make_Ready__c mr:[select LockBox_Code__c,Dwell_Type__c,Baths__c,Beds__c,Sq_Ft__c,id,Property__C,Property__r.Move_Out_Date__c,Property__r.Proforma_Rehab__c,property__r.Status_Acquisition__c,Type__C,Property__r.Parent_Property__c from Make_Ready__C where id in:makeReadySet ]){
+                //if(mr.property__r.Status_Acquisition__c!='Occupied'){
+                mrPropMap.put(mr.id,mr.Property__r.Parent_Property__c!=null?mr.Property__r.Parent_Property__c:mr.Property__C );
+                //}
+                makeReadyMap.put(mr.id,mr);
+            }
+        }
+        if(!propertyIds.isEmpty()){
+            propertyMap=new map<id,property__c>([select id, Name, state__c, ZIP__c, City__c,market__c,(SELECT Name, Yardi_RCode__c, Phone, MobilePhone, Has_Pets__c, Number_of_Months_Occupied__c, Email, Property_Id__c, Market__c FROM Contacts__r WHERE Status__c='Current' OR Status__c='Eviction' OR Status__c='Notice' LIMIT 1) FROM Property__c where id in:propertyIds]);
+        }
+        if(!uwIdSet.isEmpty() || !mrPropMap.isEmpty()){
+            for(Underwriting__C uw:[select id,Status_Acquisition__c,Current_Status__c,Estimated_Completion_Date__c,Property__C,lock_Box_Code__c,(select id,lastmodifiedby.isactive,lastmodifiedbyid,lastmodifieddate,Lockbox_Code__c,Ownerid,Owner.isactive from Work_Orders__r where RecordType.Name='Offer Inspection' or RecordType.Name='Pre-Acq Inspection' order by createddate desc),(select id,lastmodifiedby.isactive,lastmodifiedbyid,lastmodifieddate from Work_Order_Line_Items__r where RecordType.Name='Offer Inspection' or RecordType.Name='Pre-Acq Inspection' order by createddate desc),(select id,lastmodifiedby.isactive,lastmodifiedbyid,LastModifiedDate,ownerId,Owner.isactive from Tasks__r where Task_Type__c='Offer:Acquisition Inspection' or Task_Type__c='Pre Acq. Inspection' order by createddate desc) from Underwriting__C where id in : uwIdSet or Property__C in:mrPropMap.values()]){
+                if(uwIdSet.Contains(uw.id)){
+                    underwritingMap.put(uw.id,uw);
+                }
+                //Logic for not create the CE Appointment
+                if(uw.Property__C!=null  && (!uw.Work_Orders__r.isEmpty() || !uw.Tasks__r.isEmpty() || !uw.Work_Order_Line_Items__r.isEmpty())){
+                    //uwPropSet.add(uw.Property__C);
+                    uwPropMap.put(uw.Property__C,uw);
+                    if(!uw.Work_Orders__r.isEmpty()){
+                        for(Workorder wo:uw.Work_Orders__r){
+                            if(!ownerMap.containsKey(uw.Property__C) ){
+                                boolean ownerActive=String.valueof(wo.Ownerid).startsWith('005')?wo.Owner.isactive:false;
+                                if(wo.lastmodifiedby.isactive || ownerActive){
+                                    ownerMap.put(uw.Property__C,String.valueof(wo.Ownerid).startsWith('005')?wo.Ownerid:wo.lastmodifiedbyid);
+                                    createAppointmentMap.put(uw.Property__C,wo.lastmodifieddate);
+                                }
+                            }
+                            
+                            
+                        }
+                    }
+                    if(!uw.Work_Order_Line_Items__r.isEmpty()){
+                        for(WorkorderLineItem woli:uw.Work_Order_Line_Items__r){
+                            if(!ownerMap.containsKey(uw.Property__C)){
+                                if(woli.lastmodifiedby.isactive){
+                                    ownerMap.put(uw.Property__C,woli.lastmodifiedbyid);
+                                    createAppointmentMap.put(uw.Property__C,woli.lastmodifieddate);
+                                }
+                            }
+                        }
+                    }
+                    if(!uw.Tasks__r.isEmpty()){
+                        for(Task__c tsk:uw.Tasks__r){
+                            if(!ownerMap.containsKey(uw.Property__C)){
+                                boolean ownerActive=String.valueof(tsk.Ownerid).startsWith('005')?tsk.Owner.isactive:false;
+                                if(tsk.lastmodifiedby.isactive || ownerActive){
+                                    ownerMap.put(uw.Property__C,String.valueof(tsk.Ownerid).startsWith('005')?tsk.Ownerid:tsk.lastmodifiedbyid);
+                                    createAppointmentMap.put(uw.Property__C,tsk.lastmodifieddate);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                
+            }
+        }
+        
+        if(!dispositionIds.isEmpty()){
+            for(disposition__c dispo:[select id,property__r.Name,Property__r.city__c,Property__r.state__c,Property__r.zip__c,Property__r.LatLong__latitude__s,Property__r.LatLong__longitude__s,market__c,(select id,Record_Type_Name__c from workorders__r where Record_Type_Name__c!=null) from disposition__c where id in:dispositionIds]){
+                dispositionMap.put(dispo.id,dispo);
+                for(WorkOrder wo:dispo.WorkOrders__r){
+                    disPositionCount.put(dispo.id+'-'+wo.Record_Type_Name__c,disPositionCount.containsKey(dispo.id+'-'+wo.Record_Type_Name__c)?disPositionCount.get(dispo.id+'-'+wo.Record_Type_Name__c)+1:1);
+                }
+            }
+            /*for(WorkOrder wo:[select id,Record_Type_Name__c,disposition__c,disposition__r.market__c from workorder where Disposition__c in:dispositionIds and Record_Type_Name__c!=null]){
+disPositionCount.put(wo.disposition__c+'-'+wo.Record_Type_Name__c,disPositionCount.containsKey(wo.disposition__c+'-'+wo.Record_Type_Name__c)?disPositionCount.get(wo.disposition__c+'-'+wo.Record_Type_Name__c)+1:1);
+}*/
+        }
+        for(WorkOrder wo: Trigger.new){
+            if(wo.WO_Work_Type__c=='Construction' &&  wo.Make_Ready__C!=null && makeReadyMap.containsKey(wo.Make_Ready__C)){
+                wo.LockBox_Code__c=makeReadyMap.get(wo.Make_Ready__C).LockBox_Code__c;wo.Dwelling_Type__c=makeReadyMap.get(wo.Make_Ready__C).Dwell_Type__c;wo.Baths__c=makeReadyMap.get(wo.Make_Ready__C).Baths__c;wo.Beds__c=makeReadyMap.get(wo.Make_Ready__C).Beds__c;wo.Sq_Ft__c=makeReadyMap.get(wo.Make_Ready__C).Sq_Ft__c;
+            }
+            if(wo.work_type__c=='Renewal'){wo.workTypeId=workOrderLibrary.workTypeMap.get('Renewal');wo.ServiceTerritoryid=workOrderLibrary.serviceTerritoryMap.containsKey(wo.Market__C+' Service Territory(R)')?workOrderLibrary.serviceTerritoryMap.get(wo.Market__C+' Service Territory(R)'):null;}
+            if(wo.work_type__c=='Utility Renewal'&&wo.work_type__c!=null){wo.workTypeId=workOrderLibrary.workTypeMap.get('Utility Renewal');}
+            /*if(wo.Property__c!=null &&  propertyMap.containsKey(wo.Property__c) && wo.work_type__c=='Resident Maintenance Request'){
+wo.Street=propertyMap.get(wo.Property__c).Name;
+wo.State=propertyMap.get(wo.Property__c).state__c;
+wo.City=propertyMap.get(wo.Property__c).City__c;
+wo.PostalCode=propertyMap.get(wo.Property__c).ZIP__c;
+wo.Country= 'United States';
+//wo.WorktypeId=workOrderLibrary.workTypeMap.get(wo.work_type__c);
+//wo.addError(wo.work_type__c+'%%%%%%%%%%%%'+wo.WorktypeId);
+if(propertyMap.get(wo.Property__c).market__c!=null){
+wo.ServiceTerritoryid=workOrderLibrary.serviceTerritoryMap.containsKey(propertyMap.get(wo.Property__c).market__c+' Service Territory(M)')?workOrderLibrary.serviceTerritoryMap.get(propertyMap.get(wo.Property__c).market__c+' Service Territory(M)'):null;    
+} 
+if(!propertyMap.get(wo.Property__c).Contacts__r.isEmpty()){
+wo.ContactId=propertyMap.get(wo.Property__c).Contacts__r[0].Id;
+wo.Email__c=propertyMap.get(wo.Property__c).Contacts__r[0].Email;
+wo.Phone__c=propertyMap.get(wo.Property__c).Contacts__r[0].Phone;
+wo.Mobile__c=propertyMap.get(wo.Property__c).Contacts__r[0].MobilePhone;
+wo.Yardi_RCode__c=propertyMap.get(wo.Property__c).Contacts__r[0].Yardi_RCode__c;
+wo.Has_Pets__c=propertyMap.get(wo.Property__c).Contacts__r[0].Has_Pets__c;
+wo.Number_of_Months_Occupied__c=propertyMap.get(wo.Property__c).Contacts__r[0].Number_of_Months_Occupied__c;
+}
+}*/
+            if(wo.WorkTypeId!=null && wo.work_Type__c!='Resident Maintenance Request' && wo.Work_Type__c!='Renewal' && wo.Work_Type__c!='Utility Renewal'){
+                string workType=wo.WO_Work_Type__c!=null?wo.WO_Work_Type__c:wo.Record_Type_Name__c;
+                wo.Work_Type__c=workType;
+                if(wo.Work_Type__c=='Collection Letters' && wo.Market__c!=null && MakeReady_Library.qMap.containsKey(wo.Market__c+' Market Manager')){
+                    wo.OwnerId=MakeReady_Library.qMap.get(wo.Market__c+' Market Manager');
+                }
+                if(wo.Work_Type__c=='Collection Letters' && wo.subject.StartsWith('AR Occ Ins-') && MakeReady_Library.qMap.containsKey('AR Queue') && wo.Market__C!='Dayton' && wo.Market__C!='Cincinnati' && wo.Market__C!='St. Louis' && wo.Market__C!='Indianapolis'){
+                    wo.OwnerId=MakeReady_Library.qMap.get('AR Queue');
+                    wo.SubStatus__c='Occupied';
+                }
+                if(wo.disposition__c!=null){
+                    if(dispositionMap.containsKey(wo.disposition__c) && (wo.Record_Type_Name__c=='Disposition Offer' || wo.Record_Type_Name__c=='Marketing Assessment')){
+                        disposition__c dispo=dispositionMap.get(wo.disposition__c);
+                        wo.ServiceTerritoryid=workOrderLibrary.serviceTerritoryMap.containsKey(dispo.market__c+' Service Territory(C)')?workOrderLibrary.serviceTerritoryMap.get(dispo.market__c+' Service Territory(C)'):null;
+                        wo.street=dispo.Property__r.name;wo.city=dispo.Property__r.city__c;wo.state=dispo.Property__r.state__c;wo.postalcode=dispo.Property__r.zip__c;wo.Country='United States';
+                        wo.Latitude=dispo.Property__r.LatLong__latitude__s;wo.Longitude=dispo.Property__r.LatLong__longitude__s;
+                        if(MakeReady_Library.qMap.containsKey('Disposition Manager')){wo.OwnerId=MakeReady_Library.qMap.get('Disposition Manager');}
+                        string dispositionString=wo.Record_Type_Name__c=='Disposition Offer'?'DISPOFF':'MRKASST';
+                        wo.subject=(disPositionCount.containsKey(wo.disposition__c+'-'+wo.Record_Type_Name__c)?dispositionString+(disPositionCount.get(wo.disposition__c+'-'+wo.Record_Type_Name__c)+1):dispositionString+'1')+'-'+wo.street;
+                    }
+                    if(wo.Record_Type_Name__c=='Disposition Escrow' || wo.Record_Type_Name__c=='Marketing Assessment'){
+                        if(MakeReady_Library.qMap.containsKey('Disposition Analyst')){wo.OwnerId=MakeReady_Library.qMap.get('Disposition Analyst');}
+                    }
+                    if(wo.Record_Type_Name__c=='Accounting Entry'){if(MakeReady_Library.qMap.containsKey('Accounting')){wo.OwnerId=MakeReady_Library.qMap.get('Accounting');}}
+                }
+                if(workOrderLibrary.workOrderRecTypes.Containskey(workType)){
+                    
+                    if(workType=='Pre-Closing Inspection'){wo.Priority='Critical';} 
+                    if(workType=='Offer Inspection'){wo.Priority='High';}
+                    if((workType=='Pre-Closing Inspection' || workType=='Offer Inspection') && wo.Underwriting__c!=null && wo.LockBox_code__c==null){
+                        if(underwritingMap.containsKey(wo.Underwriting__c)){wo.LockBox_code__c=underwritingMap.get(wo.Underwriting__c).Lock_Box_code__c;}
+                    }
+                    if(workType=='Move In Ready Inspection' || workType=='Move In Ready Inspection Extension'){wo.Priority='Medium';}
+                    if(workType=='Pre-Acq Inspection' || workType=='Estimate'){wo.Priority='Low';}
+                    wo.RecordTypeId=workOrderLibrary.workOrderRecTypes.get(workType);
+                    if((wo.Market__c=='St. Louis' ||wo.Market__c=='Pittsburgh' || wo.Market__c=='Jackson') && wo.Work_Type__c=='Construction' && workOrderLibrary.workOrderRecTypes.Containskey('Construction OI')){
+                        wo.RecordTypeId=workOrderLibrary.workOrderRecTypes.get('Construction OI');
+                    }
+                    if(workType=='Pre-Closing Inspection'){
+                        wo.status='Pending Closing Date';
+                        wo.FSL__IsFillInCandidate__c=false;
+                        if(wo.Underwriting__C!=null){
+                            //Temporary logic for the work type removal due to covid19
+                            //wo.WorkTypeId=null;
+                            wo.DurationType='Minutes';
+                            if(underwritingMap.get(wo.Underwriting__C).Status_Acquisition__c=='Occupied'){
+                                wo.Duration=10;
+                            }
+                            else{
+                                wo.Duration=20;
+                            }
+                            wo.Estimated_Completion_Date__c=underwritingMap.get(wo.Underwriting__C).Estimated_Completion_Date__c;
+                        }
+                        if(wo.portfolio__C!=null){
+                            wo.WorkTypeId=null;
+                        }
+                    }
+                    if((workType=='Pre-Acq Inspection' || workType=='Offer Inspection') && wo.Underwriting__C!=null){
+                        if(underwritingMap.get(wo.Underwriting__C).Status_Acquisition__c=='Occupied'){
+                            wo.FSL__IsFillInCandidate__c=false;
+                            wo.DurationType='Hours';
+                            wo.Duration=1;
+                        }
+                    }
+                    if((workType=='Offer Inspection' && wo.portfolio__C!=null) ||  ((workType=='Collection Letters' || workType=='Violation') && (wo.Couriers_Needed__c!='Yes' || wo.Subject.startsWith('ATL')) )){
+                        wo.WorkTypeId=null;
+                        wo.DurationType=null;
+                        wo.Duration=null;
+                    }
+                    if(wo.Make_Ready__C!=null){
+                        if(makeReadyMap.containsKey(wo.Make_Ready__c)){
+                            wo.Type__c=makeReadyMap.get(wo.Make_Ready__c).Type__c;
+                        }
+                        //Logic for not create the CE Appointment
+                        if(workType=='Estimate'){
+                            wo.Create_Estimate_Start_Date__c=date.today();
+                            if(makeReadyMap.containsKey(wo.Make_Ready__c)){
+                                if(mrPropMap.containsKey(wo.Make_Ready__c)){
+                                    if(ownerMap.containsKey(mrPropMap.get(wo.Make_Ready__c))){
+                                        boolean createAppointment=uwPropMap.containsKey(mrPropMap.get(wo.Make_Ready__c))?uwPropMap.get(mrPropMap.get(wo.Make_Ready__c)).Status_Acquisition__c=='Vacant' && uwPropMap.get(mrPropMap.get(wo.Make_Ready__c)).Current_Status__c=='Occupied' && wo.subject.startsWithIgnoreCase('MR1-'):False;
+                                        if(createAppointmentMap.containskEy(mrPropMap.get(wo.Make_Ready__c)) && !createAppointment){
+                                            date lastmodifieddateval=date.newinstance(createAppointmentMap.get(mrPropMap.get(wo.Make_Ready__c)).year(),createAppointmentMap.get(mrPropMap.get(wo.Make_Ready__c)).month(),createAppointmentMap.get(mrPropMap.get(wo.Make_Ready__c)).day());
+                                            if(lastmodifieddateval.daysBetween(date.today())>90){createAppointment=true;}
+                                        }
+                                        if(!createAppointment){
+                                            wo.WorkTypeId=null;
+                                            wo.status='Pending Doc Upload';
+                                        }
+                                        wo.ownerid=ownerMap.get(mrPropMap.get(wo.Make_Ready__c));
+                                    }
+                                }
+                            }
+                        }
+                        if(workType=='Move In Ready Inspection' || workType=='Move In Ready Inspection Extension'){
+                            wo.FSL__IsFillInCandidate__c=false;
+                            if(workType=='Move In Ready Inspection'){
+                                if((wo.Subject.SubStringAfter('-')).SubStringBefore('-')!='MIR1'){
+                                    //wo.WorktypeId=null;
+                                    wo.Service_Appointment_Required__c=false;
+                                }
+                            }
+                        }
+                        else{
+                            wo.FSL__IsFillInCandidate__c=true;
+                        }
+                        if(wo.Type__c=='Turn'){
+                            wo.WorkTypeId=null;
+                        }
+                    }
+                    if(wo.Utility__C!=null && workOrderLibrary.workOrderRecTypes.Containskey(wo.Record_Type_Name__c) ){
+                        wo.WorkTypeId=(wo.Market__c=='Dayton' || wo.Market__c=='Cincinnati')?workOrderLibrary.workOrderRecTypes.get(wo.Record_Type_Name__c):null ;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,231 @@
+({
+    callSuccess : function(component, event, helper){
+        /*component.set('v.mycolumns', [
+            {label: 'Address', fieldName: 'Address__c', type: 'text',editable:'true'},
+            {label: 'Lock Box Code', fieldName: 'Lock_Box_Code__c', type: 'text',editable:'true'},
+            {label: 'Does the Inspector need to meet someone at the property?', fieldName: 'Inspector_need_to_me_someone_at_the_prop__c', type: 'text',editable:'true'},
+            {label: 'Is this an Electronic Lock Box?', fieldName: 'Electronic_Lock_Box__c', type: 'text',editable:'true'}
+        ]);*/
+        var recordId = component.get("v.recordId");
+        var Type=component.find("AcquisitionType").get("v.value");
+        var action = component.get("c.getUnderwritings");
+        //alert(recordId);
+        action.setParams({"recordId": recordId,"Scope": Type});
+        action.setCallback(this, function(response) {
+            var state = response.getState();
+            if(component.isValid() && state == "SUCCESS"){
+                var detailList =response.getReturnValue();
+                //alert(JSON.stringify(response.getReturnValue()));
+                //alert(JSON.stringify(detailList));
+                //alert(response.getReturnValue().length);
+                var UWArray=[];
+                for (var i = 0; i < response.getReturnValue().length; i++) {                    
+                    if(!response.getReturnValue()[i].Work_Orders__r){          
+                        UWArray.push(response.getReturnValue()[i]);                        
+                        //JSON.stringify(alert(detailList[i]));
+                    }
+                    //alert(response.getReturnValue()[i].Work_Orders__r);
+                    
+                }
+                component.set("v.underwritingsList", UWArray);
+                //alert(JSON.stringify(alert(UWArrays)));
+                component.set("v.showUnderwritings",true);
+                //alert(UWArray.length);
+            } else {
+                console.log('There was a problem : '+response.getError());
+                component.set("v.showUnderwritings",true);
+            }
+        });
+        $A.enqueueAction(action);
+    },
+   //Select all Records
+    handleSelectAllRecords: function(component, event, helper) {
+        var getID = component.get("v.underwritingsList");
+        var checkvalue = component.find("selectAll").get("v.value");        
+        var checkRecords = component.find("checkRecords"); 
+        if(checkvalue == true){
+            for(var i=0; i<checkRecords.length; i++){
+                checkRecords[i].set("v.value",true);
+            }
+        }
+        else{ 
+            for(var i=0; i<checkRecords.length; i++){
+                checkRecords[i].set("v.value",false);
+            }
+        }
+    },
+    //update comment Button
+    updateComments:function(component,event,helper){
+        var comment = component.find("Comment").get("v.value");  
+         var checkvalue = component.find("checkRecords");
+        console.log('comment ---'+comment);
+    var SelectedUWS = [];
+         var UPcomment = component.find("commentsID");
+        if(!Array.isArray(checkvalue)){
+            if (checkvalue.get("v.value") == true) {
+                UPcomment.set("v.value",comment);
+                SelectedUWS.push(checkvalue.get("v.value"));
+            }
+        }else{
+            for (var i = 0; i < checkvalue.length; i++) {
+                if (checkvalue[i].get("v.value") == true) {
+                    UPcomment[i].set("v.value",comment);
+                    SelectedUWS.push(checkvalue[i].get("v.value"));
+                }
+            }
+        }
+    console.log('SelectedUWS---'+SelectedUWS);
+       
+    },
+    //LockBox Button
+    updateLockBoxCode:function(component,event,helper){
+     var LockBox = component.find("LockBox").get("v.value"); 
+     var checkvalue = component.find("checkRecords");
+     console.log('LockBox ---'+LockBox); 
+     var SelectedUWS = [];
+  
+     var UPLockBox = component.find("LockBoxID");
+    if(!Array.isArray(checkvalue)){
+        if (checkvalue.get("v.value") == true) {
+           UPLockBox.set("v.value",LockBox);
+           SelectedUWS.push(checkvalue.get("v.value"));
+         }
+    }else{
+         for (var i = 0; i < checkvalue.length; i++) {
+              if (checkvalue[i].get("v.value") == true) {
+                 UPLockBox[i].set("v.value",LockBox);
+               SelectedUWS.push(checkvalue[i].get("v.value"));
+             }
+        }
+      }
+          console.log('SelectedUWS---'+SelectedUWS);
+    
+        },
+    
+    
+    //ElectronicLockBox
+    ElectronicLockBox:function(component,event,helper){
+           var ELB = component.find("ElectronicLockBox").get("v.value"); 
+        var checkvalue = component.find("checkRecords");
+       console.log('ELB ---'+ELB);
+    var SelectedUWS = [];
+       var ELockBox = component.find("ElectionBox");
+           if(!Array.isArray(checkvalue)){
+             if (checkvalue.get("v.value") == true) {
+               ELockBox.set("v.value",ELB);
+            SelectedUWS.push(checkvalue.get("v.value"));
+       }
+          }else{
+            for (var i = 0; i < checkvalue.length; i++) {
+             if (checkvalue[i].get("v.value") == true) {
+              ELockBox[i].set("v.value",ELB);
+                SelectedUWS.push(checkvalue[i].get("v.value"));
+                 }
+           }
+    }
+    console.log('SelectedUWS---'+SelectedUWS);
+    },
+    
+    //Inspection Property
+    Inspectorproperty:function(component,event,helper){
+        var IP = component.find("Inspectorproperty").get("v.value"); 
+        var checkvalue = component.find("checkRecords");
+        console.log('IP ---'+IP);
+        var SelectedUWS = [];
+        var IPBox = component.find("InspectorPropertyMeet");
+        if(!Array.isArray(checkvalue)){
+            if (checkvalue.get("v.value") == true) {
+                IPBox.set("v.value",IP);
+                SelectedUWS.push(checkvalue.get("v.value"));
+            }
+        }else{
+            for (var i = 0; i < checkvalue.length; i++) {
+                if (checkvalue[i].get("v.value") == true) {
+                    IPBox[i].set("v.value",IP);
+                    SelectedUWS.push(checkvalue[i].get("v.value"));
+                }
+            }
+        }
+        console.log('SelectedUWS---'+SelectedUWS);
+    },
+    
+    //Preference Type
+    PreferenceTypefield:function(component,event,helper){
+        var IP = component.find("PreferenceType").get("v.value"); 
+        var checkvalue = component.find("checkRecords");
+        console.log('IP ---'+IP);
+        var SelectedUWS = [];
+        var IPBox = component.find("preferenceField");
+        if(!Array.isArray(checkvalue)){
+            if (checkvalue.get("v.value") == true) {
+                IPBox.set("v.value",IP);
+                SelectedUWS.push(checkvalue.get("v.value"));
+            }
+        }else{
+            for (var i = 0; i < checkvalue.length; i++) {
+                if (checkvalue[i].get("v.value") == true) {
+                    IPBox[i].set("v.value",IP);
+                    SelectedUWS.push(checkvalue[i].get("v.value"));
+                }
+            }
+        }
+        console.log('SelectedUWS---'+SelectedUWS);
+    },
+    
+    //Update Flag
+    UpdateFlag:function(component,event,helper){
+        var UF = component.find("FlagType").get("v.value"); 
+        var checkvalue = component.find("checkRecords");
+        console.log('UF ---'+UF);
+        var SelectedUWS = [];
+        var UFBox = component.find("FlagBox");
+        if(!Array.isArray(checkvalue)){
+            if (checkvalue.get("v.value") == true) {
+                UFBox.set("v.value",UF);
+                SelectedUWS.push(checkvalue.get("v.value"));
+            }
+        }else{
+            for (var i = 0; i < checkvalue.length; i++) {
+                if (checkvalue[i].get("v.value") == true) {
+                    UFBox[i].set("v.value",UF);
+                    SelectedUWS.push(checkvalue[i].get("v.value"));
+                }
+            }
+        }
+        console.log('SelectedUWS---'+SelectedUWS);
+    },
+    
+    
+    
+
+    
+    handleSave:function(component,event,helper){
+         var SelectedUWS = [];
+        var checkvalue = component.find("checkRecords");
+         
+        if(!Array.isArray(checkvalue)){
+            if (checkvalue.get("v.value") == true) {
+                SelectedUWS.push(checkvalue.get("v.text"));
+            }
+        }else{
+            for (var i = 0; i < checkvalue.length; i++) {
+                if (checkvalue[i].get("v.value") == true) {
+                    SelectedUWS.push(checkvalue[i].get("v.text"));
+                }
+            }
+        }
+    console.log('SelectedUWS---'+SelectedUWS);
+        //alert(JSON.stringify(component.get("v.underwritingsList")));
+        var action = component.get("c.createPAIInspections");
+        action.setParams({
+            "UWList": SelectedUWS//component.get("v.underwritingsList")
+        });
+        action.setCallback(this, function(response) {
+            var state = response.getState();
+            if (state === "SUCCESS") {
+                alert(response.getReturnValue());
+            }
+        }); 
+        $A.enqueueAction(action);
+    }
+})
