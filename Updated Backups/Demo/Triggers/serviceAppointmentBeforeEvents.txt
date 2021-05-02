@@ -1,0 +1,278 @@
+trigger serviceAppointmentBeforeEvents on ServiceAppointment (before update,before insert) {
+    
+    if(Trigger.isUpdate){
+        set<id> cannotCompleteServiceAppointmentIds=new set<id>();
+        set<id> serviceAppointmentParentSet=new set<id>();
+        set<id> serviceAppointmentSet=new set<id>();
+        for(ServiceAppointment sa:Trigger.new){
+            //disabled to check the service appointments overlappings
+            /*if(sa.status=='None' && Trigger.oldMap.get(sa.id).status!=sa.status){
+sa.SchedStartTime=null;
+sa.SchedEndTime=null;
+sa.FSL__Pinned__c=false;
+}*/
+            if(sa.status=='In Progress' && Trigger.oldMap.get(sa.id).status!=sa.status){
+                sa.ActualStartTime=system.now();
+                //logic to set the scheduled start and End Dates when the SA status set to Inprogress
+                if(sa.SchedStartTime!=null && sa.SchedEndTime!=null){
+                    Long scheduledSeconds = ((sa.SchedEndTime.getTime() -sa.SchedStartTime.getTime())/ 1000);
+                    Long scheduledMinutes = scheduledSeconds/60;
+                    //Long scheduledHours = scheduledMinutes/60;
+                    sa.SchedStartTime=system.now();
+                    sa.SchedEndTime=system.now().addMinutes(integer.valueof(scheduledMinutes));
+                }
+                sa.FSL__Pinned__c=false;
+            }
+            if((sa.status=='Completed' || sa.status=='Cannot Complete') && (Trigger.oldMap.get(sa.id).status!=sa.status)){
+                if(sa.Status=='Completed'){
+                    sa.FSL__GanttColor__c=System.Label.Light_Green;
+                }
+                else{
+                    sa.FSL__GanttColor__c=System.Label.Light_Red;
+                }
+                sa.ActualEndTime=system.now();
+                if(sa.status=='Cannot Complete' && (sa.ServiceNote==null || sa.Cannot_Complete_Reason__c==null)){
+                    if(sa.ServiceNote==null && sa.Cannot_Complete_Reason__c==null){
+                        sa.addError('Please enter \'Serivce Note\' and \'Cannot Complete Reason\' in the Service Appointment');
+                    }
+                    else if(sa.ServiceNote==null && sa.Cannot_Complete_Reason__c!=null){
+                        sa.addError('Please enter \'Serivce Note\'  in the Service Appointment');
+                    }
+                    else{
+                        sa.addError('Please enter \'Cannot Complete Reason\' in the Service Appointment');
+                    }
+                    //SELECT Id, Parent.Id, Parent.Type FROM Note WHERE Parent.Type='Opportunity
+                }
+                //populating the scheduled end date for giving space to another appointments
+                sa.SchedEndTime=system.now();
+                if(sa.subject.contains('-') && sa.subject.contains('MIR') && (sa.MIR_Status__c==null || (sa.MIR_Status__c=='Failed' &&  (sa.MIR_Comments__c==null || sa.MIR_Sub_Status__c==null)))){
+                    if(sa.Subject.subStringAfter('-').startsWith('MIR')){
+                        sa.addError('Please choose \'MIR Status\' and enter \'MIR Comments\' and \'MIR Sub Status\' for failed MIR Status');
+                    }
+                    
+                }
+                sa.FSL__Pinned__c=false;
+                if(sa.SchedStartTime!=null && sa.SchedEndTime!=null){
+                    Long scheduledMinutes = ((sa.SchedEndTime.getTime()- sa.SchedStartTime.getTime())/1000)/60;
+                    Long scheduledHours = scheduledMinutes/60;
+                    if(scheduledHours>=1){
+                        sa.Duration= scheduledHours;
+                        sa.DurationType='Hours';
+                    }
+                    else{
+                        sa.Duration= scheduledMinutes>=1?scheduledMinutes:1;
+                        sa.DurationType='Minutes';
+                    }
+                    //populating the scheduled end date for giving space to another appointments
+                    sa.SchedEndTime=scheduledMinutes>=1?system.now():system.now().addMinutes(1);
+                }
+            }
+            if(sa.status=='Scheduled' && Trigger.oldMap.get(sa.id).status!=sa.status){
+                if(sa.FSL__Pinned__c==false){
+                    serviceAppointmentParentSet.add(sa.ParentRecordid);
+                }
+                serviceAppointmentSet.add(sa.id);
+            }
+            if(sa.status=='Canceled' && (sa.Cancel_Appointment__c==false && !FeatureManagement.checkPermission(Label.CancelServiceAppointment))){
+                sa.addError('You are not allowed to Cancel Appointment');
+            }
+            string oldWOStatus=Trigger.oldmap.get(sa.Id).Status;
+            if ((oldWOStatus== 'Completed' || oldWOStatus=='Cannot Complete' || oldWOStatus=='Canceled') && sa.status!=oldWOStatus && !FeatureManagement.checkPermission(Label.ModifyClosedWorkOrder)) {
+                sa.addError('You are not allowed to modify the '+oldWOStatus+' Appointment');
+            }
+            
+            /*---For WO with a low priority, they can only be rescheduled up to 5 times.  On the 5th time, the SA is pinned.----START-----*/
+            //sa.Number_Of_Times_Scheduled__c=0; 
+            
+            if(sa.Status=='Scheduled'&& Trigger.oldMap.get(sa.Id).Status!=sa.Status){
+                
+                Double scheduleCount=sa.Number_Of_Times_Scheduled__c+1;
+                sa.Number_Of_Times_Scheduled__c=scheduleCount;
+                Id sAppointmentRecordTypeId =Schema.SObjectType.ServiceAppointment.getRecordTypeInfosByDeveloperName().get('Resident_Maintenance_Request').getRecordTypeId();
+                
+                if((scheduleCount==5 && sa.RecordTypeId==sAppointmentRecordTypeId) || sa.Work_Type__c=='Renewal'){
+                    sa.FSL__Pinned__c=true;
+                }
+                
+            }
+            /*---For WO with a low priority, they can only be rescheduled up to 5 times.  On the 5th time, the SA is pinned.----END------*/
+            
+            //To Remove conflits between scheduled dates and the arrival dates
+            //sa.ArrivalWindowEndTime=null;
+            //sa.ArrivalWindowStartTime=null;
+        }
+        //Ended code for checking the appointments contains Notes
+        
+        //Update the Owner Id as the Service Resource
+        map<id,AssignedResource> assignedResourceMap=new map<id,AssignedResource>();
+        if(!serviceAppointmentSet.isEmpty()){
+            for(AssignedResource assgndResource:[select id,ServiceResourceId,ServiceResource.RelatedRecordid,ServiceCrewId,ServiceAppointmentId from AssignedResource where ServiceAppointmentId in :serviceAppointmentSet] )
+            {
+                assignedResourceMap.put(assgndResource.ServiceAppointmentId,assgndResource);
+            }
+            
+        }
+        
+        //code started for checking the workorder type and update the fields based on the type
+        if(!serviceAppointmentParentSet.isEmpty() || !assignedResourceMap.isEmpty()){
+            map<id,Sobject> workOrderMap=new Map<id,Sobject>();
+            if(!serviceAppointmentParentSet.isEmpty()){
+                for(WorkOrder wo:[select Inspector_need_to_me_someone_at_the_prop__c,id,WorkTypeId,Subject, WorkType.Name,Underwriting__r.Status_Acquisition__c,Underwriting__C,Offer__C,Portfolio__c,Make_Ready__C from WorkOrder where id in : serviceAppointmentParentSet]){
+                    workOrderMap.put(wo.id,wo);
+                }
+                for(WorkOrderLineItem woli:[select id,Subject,WorkType.Name,Underwriting__r.Status_Acquisition__c,Underwriting__C,Offer__C,Portfolio__c,Make_Ready__C from WorkOrderLineItem where id in : serviceAppointmentParentSet]){
+                    workOrderMap.put(woli.id,woli);
+                }
+            }
+            for(ServiceAppointment sa:Trigger.new){
+                if(workOrderMap.containsKey(sa.ParentRecordId)){
+                    string workType=(string)workOrderMap.get(sa.ParentRecordId).getSobject('WorkType').get('Name');
+                    //offer inspection and courier inspection pinned status to ture
+                    if(workType=='Offer Inspection' || workType=='Collection Letters'){
+                        sa.FSL__Pinned__c=true;
+                    }
+                    //occupied pre acq inspection pinned status to ture
+                    if(workType=='Pre-Acq Inspection'){
+                        if(workOrderMap.get(sa.ParentRecordId).get('Underwriting__C')!=null){
+                            if(workOrderMap.get(sa.ParentRecordId).getSobject('Underwriting__r').get('Status_Acquisition__c')=='Occupied' || sa.Inspector_meet_someone_property__c=='Yes' || sa.Electronic_Lock_Box__c==True){
+                                sa.FSL__Pinned__c=true;
+                            }
+                        }
+                    }
+                }
+                if(assignedResourceMap.containsKey(sa.id)){
+                    if(assignedResourceMap.get(sa.id).ServiceResource.RelatedRecordid!=null){
+                        sa.OwnerId=assignedResourceMap.get(sa.id).ServiceResource.RelatedRecordid;
+                    }
+                }
+            }
+        }
+        //code Ended for checking the workorder type and update the fields based on the type
+    }
+    
+    //Before Insert
+    if(Trigger.isInsert){
+        workOrderLibrary.getServiceTerritory();
+        workOrderLibrary.initSARecordTypes();
+        set<id> serviceAppointmentParentSet=new set<id>();
+        set<id> pendingSaWoset=new set<id>();
+        for(ServiceAppointment sa:Trigger.new){
+            serviceAppointmentParentSet.add(sa.ParentRecordid);
+        }
+        if(!serviceAppointmentParentSet.isEmpty()){
+            map<id,Sobject> workOrderMap=new Map<id,Sobject>();
+            for(WorkOrder wo:[select Retention__c,Pets__c,move_in_date__c,Lease_To_Date__c,Property_id__c,OwnerId,Market__c,Contact.Property__r.Name,ContactId,email__c,phone__c,mobile__c,Has_Pets__c,Number_of_Months_Occupied__c,Yardi_RCode__c,(select id,Market__c,Contact.Property__r.Name from serviceAppointments where StatusCategory!='CannotComplete' and StatusCategory!='Completed' and StatusCategory!='Canceled'),Electronic_Lock_Box__c,Inspector_need_to_me_someone_at_the_prop__c,Lockbox_Code__c,Comments__c,Underwriting__r.Portfolio__c,Underwriting__r.Portfolio__r.Estimated_Closing_Date__c,RecordType.Name,Work_Type__c,Underwriting__r.Market__C,Make_Ready__r.Market__C,id,WorkTypeId,Subject,Duration,DurationType, WorkType.Name,Underwriting__r.Status_Acquisition__c,Underwriting__r.Estimated_Completion_Date__c,Underwriting__C,Offer__C,Portfolio__c,Make_Ready__C from WorkOrder where id in : serviceAppointmentParentSet]){
+                workOrderMap.put(wo.id,wo);
+                if(!wo.ServiceAppointments.isEmpty()){
+                    pendingSaWoset.add(wo.id);
+                }
+            }
+            
+            for(WorkOrderLineItem woli:[select WorkOrder.OwnerId,Market__c,(select id from serviceAppointments where StatusCategory!='CannotComplete' and StatusCategory!='Completed' and StatusCategory!='Canceled'),Comments__c,Underwriting__r.Portfolio__c,Underwriting__r.Portfolio__r.Estimated_Closing_Date__c,RecordType.Name,Work_Type__c,Underwriting__r.Market__C,Make_Ready__r.Market__C,id,WorkTypeId,Subject,Duration,DurationType, WorkType.Name,Underwriting__r.Status_Acquisition__c,Underwriting__r.Estimated_Completion_Date__c,Underwriting__C,Offer__C,Portfolio__c,Make_Ready__C from WorkOrderLineItem where id in : serviceAppointmentParentSet]){
+                workOrderMap.put(woli.id,woli);
+                if(!woli.ServiceAppointments.isEmpty()){
+                    pendingSaWoset.add(woli.id);
+                }
+            }
+            for(ServiceAppointment sa:Trigger.new){
+                if(workOrderMap.containsKey(sa.ParentRecordId)){
+                    sa.DurationType=(string)workOrderMap.get(sa.ParentRecordId).get('DurationType');
+                    sa.Duration=(decimal)workOrderMap.get(sa.ParentRecordId).get('Duration');
+                    if((string)workOrderMap.get(sa.ParentRecordId).get('Underwriting__C')!=null){
+                        sa.Underwriting__C=(ID)workOrderMap.get(sa.ParentRecordId).get('Underwriting__C');
+                    }
+                    else if((string)workOrderMap.get(sa.ParentRecordId).get('Make_Ready__c')!=null){
+                        sa.Make_Ready__c=(Id)workOrderMap.get(sa.ParentRecordId).get('Make_Ready__c');
+                    }
+                }
+                if(pendingSaWoset.contains(sa.parentRecordId)){
+                    sa.addError('Please complete all the pending appointments and try');
+                }
+                sa.FSL__Schedule_over_lower_priority_appointment__c=true;
+                
+                if(workOrderMap.containsKey(sa.ParentRecordId)){
+                    if(string.valueof(sa.ParentRecordId).startswith('0W')){
+                        sa.Ownerid=(string)workOrderMap.get(sa.ParentRecordId).get('OwnerId');
+                    }
+                    else{
+                        sa.OwnerId=(string)workOrderMap.get(sa.ParentRecordId).getSobject('WorkOrder').get('OwnerId');
+                    }
+                    if(sa.FSL__GanttLabel__c==null){
+                        sa.FSL__GanttLabel__c=(String)workOrderMap.get(sa.ParentRecordId).get('Subject');
+                    }
+                    string workType=(string)workOrderMap.get(sa.ParentRecordId).getSobject('RecordType').get('Name');
+                    sa.Work_Type__c=workType;
+                    if(sa.Work_Type__c!='Collection Letters'){
+                        sa.RecordTypeId=workOrderLibrary.serviceAppointmentRecTypes.get('Inspection');
+                        if(sa.Work_Type__c=='Violation'){ sa.RecordTypeId=workOrderLibrary.serviceAppointmentRecTypes.get('Violation');}
+                        if(sa.Work_Type__c=='Resident Maintenance Request' || sa.Work_Type__c=='Renewal'){ 
+                            workorder wo=(workorder)workOrderMap.get(sa.ParentRecordId);
+                            sa.RecordTypeId=workOrderLibrary.serviceAppointmentRecTypes.get(sa.Work_Type__c);
+                            if(wo.Retention__c!=null || sa.Work_Type__c=='Renewal'){sa.EarliestStartTime=(datetime.newInstance(System.today().Year(), System.today().Month(), System.today().Day(),6,00,00)).AddDays(3);sa.DueDate= (datetime.newInstance(System.today().Year(), System.today().Month(), System.today().Day(),21,00,00)).AddDays(3);sa.Market__c=wo.Market__c;sa.move_in_date__c=wo.move_in_date__c;sa.Lease_To_Date__c=wo.Lease_To_Date__c;sa.Unit__c=wo.Property_id__c;sa.Pets__c=wo.Pets__c;}
+                            sa.Email__c=wo.Email__c;sa.Phone__c=wo.Phone__c;sa.Mobile__c=wo.Mobile__c;sa.Yardi_RCode__c=wo.Yardi_RCode__c;sa.Number_of_Months_Occupied__c=wo.Number_of_Months_Occupied__c;sa.Has_Pets__c=wo.Has_Pets__c;if(string.isNotBlank(wo.contactId))sa.ContactId=wo.ContactId;
+                            sa.FSL__Schedule_over_lower_priority_appointment__c=true;
+                        }
+                    }
+                    else{
+                        sa.RecordTypeId=workOrderLibrary.serviceAppointmentRecTypes.get('Collection Letters');
+                        sa.Market__c=(string)workOrderMap.get(sa.ParentRecordId).get('Market__c');
+                        if(sa.FSL__GanttLabel__c.contains('AR Occ Ins-')){
+                            sa.ContactId=(Id)workOrderMap.get(sa.ParentRecordId).get('ContactId');
+                            sa.RecordTypeId=workOrderLibrary.serviceAppointmentRecTypes.get('AR Occupancy Inspection');
+                            sa.Subject='AR Inspection - '+(string)workOrderMap.get(sa.ParentRecordId).getSobject('Contact').getSobject('Property__r').get('Name')+'-'+(string)workOrderMap.get(sa.ParentRecordId).get('Market__c');
+                            
+                        }
+                    }
+                    if(workType=='Pre-Acq Inspection' || workType=='Offer Inspection' || workType=='Pre-Closing Inspection'){
+                        if(workType=='Pre-Acq Inspection'){
+                            sa.FSL__GanttColor__c=System.Label.Teal;
+                            sa.Work_Order_Comments__C=(String)workOrderMap.get(sa.ParentRecordId).get('Comments__C');
+                            sa.Lockbox_Code__c=(String)workOrderMap.get(sa.ParentRecordId).get('Lockbox_Code__c');
+                            sa.Electronic_Lock_Box__c=(Boolean)workOrderMap.get(sa.ParentRecordId).get('Electronic_Lock_Box__c');
+                            sa.Inspector_meet_someone_property__c=(String)workOrderMap.get(sa.ParentRecordId).get('Inspector_need_to_me_someone_at_the_prop__c') ;
+                        }
+                        else if(workType=='Offer Inspection'){
+                            sa.FSL__GanttColor__c=System.Label.Dark_Orange;
+                        }
+                        else if(workType=='Pre-Closing Inspection'){
+                            sa.FSL__GanttColor__c=System.Label.Purple_Color;
+                            sa.FSL__IsFillInCandidate__c=false;
+                        }
+                        if(workOrderMap.get(sa.ParentRecordId).get('Underwriting__C')!=null){
+                            if(workOrderMap.get(sa.ParentRecordId).getSobject('Underwriting__r').get('Status_Acquisition__c')=='Occupied'){
+                                sa.FSL__Schedule_Mode__c='Manual';
+                                sa.FSL__IsFillInCandidate__c=false;
+                                if(workType=='Pre-Acq Inspection'){
+                                    sa.FSL__GanttColor__c=System.Label.Light_Yellow;
+                                }
+                                else if(workType=='Offer Inspection'){
+                                    sa.FSL__GanttColor__c=System.Label.Light_Orange;
+                                }
+                            }
+                        }
+                    }
+                    else if(workType=='Move In Ready Inspection' || workType=='Move In Ready Inspection Extension'){
+                        sa.FSL__GanttColor__c=System.Label.Green_Color;
+                        sa.FSL__IsFillInCandidate__c=True;
+                    }
+                    else if(workType=='Re-Key & Create Estimate' || workType=='Estimate'){
+                        sa.FSL__GanttColor__c=System.Label.Blue_Color;
+                        sa.FSL__IsFillInCandidate__c=True;
+                    }
+                    if(workOrderMap.get(sa.ParentRecordId).get('Underwriting__C')!=null){
+                        sa.Market__C=string.valueof(workOrderMap.get(sa.ParentRecordId).getSobject('Underwriting__r').get('Market__C'));
+                        if(workOrderLibrary.serviceTerritoryMap.containsKey(sa.Market__C)){
+                            sa.ServiceTerritoryid=workOrderLibrary.serviceTerritoryMap.get(sa.Market__C+' Service Territory');
+                        }
+                    }
+                    else if(workOrderMap.get(sa.ParentRecordId).get('Make_Ready__C')!=null){
+                        sa.Market__C=string.valueof(workOrderMap.get(sa.ParentRecordId).getSobject('Make_Ready__r').get('Market__C'));
+                        if(workOrderLibrary.serviceTerritoryMap.containsKey(sa.Market__C)){
+                            sa.ServiceTerritoryid=workOrderLibrary.serviceTerritoryMap.get(sa.Market__C+' Service Territory');
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,44 @@
+public without sharing class  portfolioPAI {
+    
+    @AuraEnabled
+    public static list<Underwriting__c> getUnderwritings(id recordId,string Scope){
+        //string portfolioId=recordId;string statusAcquisition=Scope;
+        system.debug(Scope+'############'+recordId);
+        list<Underwriting__c> UWList=new list<Underwriting__c>();
+        string queryString='select (select id from Work_Orders__r where recordtype.name=\'Pre-Acq Inspection\'),Inspector_need_to_me_someone_at_the_prop__c,Electronic_Lock_Box__c,id,Status_Acquisition__c,Lock_Box_Code__c,Resource__c,Address__c,PAI_Comments__c,Market__c,city__C,state__C,Location__Latitude__s,Location__Longitude__s,Zip__C from Underwriting__C where portfolio__C=:recordId';
+        if(Scope!='All'){queryString=queryString+' and Status_Acquisition__c=:Scope';}
+        //return new list<Underwriting__c>([select (select id from Work_Orders__r where recordtype.name='Pre-Acq Inspection'),id,Status_Acquisition__c,Lock_Box_Code__c,Resource__c,Address__c from Underwriting__C where portfolio__C=:recordId ]);
+        return Database.query(queryString);
+    }
+    
+    
+    
+    
+    
+    @AuraEnabled
+    public static string createPAIInspections(list<Underwriting__C> UWList)   {
+        try{
+            workOrderLibrary.getWorkType();
+        workOrderLibrary.getServiceTerritory();
+            MakeReady_Library.initQMap();
+            list<workorder> woList=new list<workorder>();
+            for(Underwriting__C uw:UWList){
+               String Queue_Name=uw.Market__c+' '+'Construction Estimator';
+                WorkOrder PAIWO=new WorkOrder(Underwriting__c=uw.id,subject='PAI-'+uw.Address__C,StartDate=DateTime.now(),Street=uw.address__c,
+						City=uw.city__C,State=uw.state__C,Country='United States',Latitude=uw.Location__Latitude__s,Priority='Medium',
+						Longitude=uw.Location__Longitude__s,PostalCode=uw.Zip__C,Lockbox_Code__c=uw.Lock_Box_Code__c,
+						Comments__c=uw.PAI_Comments__c,Electronic_Lock_Box__c=uw.Electronic_Lock_Box__c=='Yes'?True:false,FSL__IsFillInCandidate__c=false,
+						Inspector_need_to_me_someone_at_the_prop__c=uw.Inspector_need_to_me_someone_at_the_prop__c);
+                if(workOrderLibrary.workTypeMap.ContainsKey('Pre-Acq Inspection')){ PAIWO.WorkTypeID=workOrderLibrary.workTypeMap.get('Pre-Acq Inspection'); }
+                if(workOrderLibrary.serviceTerritoryMap.containsKey(uw.Market__c+' Service Territory')){PAIWO.ServiceTerritoryid=workOrderLibrary.serviceTerritoryMap.get(uw.Market__c+' Service Territory');}
+                if(MakeReady_Library.qMap.containskey(Queue_Name)){PAIWO.Ownerid= MakeReady_Library.qMap.get(Queue_Name);}
+                woList.add(PAIWO);
+            }
+            insert woList;
+            update UWList;
+            return 'Inspection(s) created Successfully';}
+        catch(Exception e){
+            return e.getMessage();
+        }
+    }
+}

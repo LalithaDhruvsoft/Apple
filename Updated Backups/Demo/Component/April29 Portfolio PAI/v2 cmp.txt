@@ -1,0 +1,235 @@
+<aura:component controller="portfolioPAI" implements="flexipage:availableForAllPageTypes,flexipage:availableForRecordHome,force:hasRecordId,force:lightningQuickAction" access="global" >
+    <!--style to incraee width-->
+    <aura:html tag="style">
+        .slds-modal__container{
+        width: 50% !important;
+        max-width: 100% !important;
+        }
+    </aura:html>
+    
+    <aura:attribute name="headerSection" type="sobject" default="{'sobjectType' : 'Underwriting__c',
+                                                                 'Address__c' : '',
+                                                                 'Lock_Box_Code__c' : '',
+                                                                 'Resource__c' :'',
+                                                                 'Inspector_need_to_me_someone_at_the_prop__c': '',
+                                                                 'Electronic_Lock_Box__c':'',
+                                                                 'Comments__c':''
+                                                                 }"/>
+    <aura:attribute name="isSelectAll" type="boolean" default=""/>
+    <aura:attribute name="mycolumns" type="List"/>
+    <aura:attribute name="recordId" type="Id" />
+    <aura:attribute name="underwritingsList" type="object"/> 
+    <aura:attribute name="showUnderwritings" type="boolean" default=""/>
+    <aura:attribute name="updateComments" type="String" default=""/>
+    <aura:attribute name="updateLockBoxCode" type="String" default=""/>
+    <aura:attribute name="updateElectronicLockBox" type="String" default=""/>
+    <aura:attribute name="updateInspectorproperty" type="String" default=""/>
+    <aura:attribute name="PreferenceTypeField" type="String" default=""/>
+    <aura:attribute name="selectedLookUpRecords" type="sObject[]" default="[]"/>
+    <aura:attribute name="FlagPicklist" type="String" default=""/>
+    <lightning:recordEditForm recordId="{!v.recordId}" objectApiName="Portfolio__c" onsuccess="{!c.callSuccess}">
+        <div class="slds-col slds-order_1 slds-size_1-of-3"></div>
+        <div class="slds-col slds-order_2 slds-size_1-of-3">
+        <lightning:inputField fieldName="PAI_Inspection__c" aura:id="AcquisitionType"/>
+            </div><div class="slds-col slds-order_3 slds-size_1-of-3"></div>
+        <lightning:button class="slds-m-top_small" variant="brand" type="submit" name="Next" label="Next"/>
+    </lightning:recordEditForm>
+    <aura:if isTrue="{!v.showUnderwritings}">
+        <!--lightning:datatable data="{! v.underwritingsList }"
+                         columns="{! v.mycolumns }"
+                         keyField="id"
+                         hideCheckboxColumn="true" onrowaction="{! c.handleRowAction }" /-->
+        
+        <div class="slds-m-around_xx-large">
+            <h1 class="slds-text-heading--medium" style="padding-left: 16px;">Underwritings</h1>
+            <br/>   
+            <div style="display:flex;">
+                <div class="row slds-size_1-of-4 slds-m-right_medium">                   
+                    <lightning:input aura:id="Comment" name="originField" label="Add Comment" value="{!v.updateComments}" />
+                </div>                
+                <img aria-hidden="true" id="logo" style="height: 1%;max-width: 1.5%;margin-right: 12%;padding-top: 1.65%;" src="{!$Resource.Green_Update_Logo}" onclick="{!c.updateComments}"  alternativeText="updateComment"  > </img>               
+                
+                <div class="row slds-size_1-of-4  slds-m-right_medium">                   
+                    <lightning:input aura:id="LockBox" name="originField" label="Add LockBox Code" value="{!v.updateLockBoxCode}" />
+                </div>
+                <img aria-hidden="true" id="logo" style="height: 1%;max-width: 1.5%;margin-right: 12%;padding-top: 1.65%;" src="{!$Resource.Green_Update_Logo}" onclick="{!c.updateLockBoxCode}"  alternativeText="updateLockBoxCode" > </img>                
+            </div> 
+            
+            
+            <div style="display:flex;">
+                
+                <div class="row slds-size_1-of-4 slds-m-right_medium"> 
+                    <lightning:select  name="Choose one" aura:id="ElectronicLockBox" label="Is this an Electronic Lock Box?" value="{!v.updateElectronicLockBox}"  >       
+                        <option value="">Choose one...</option> 
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                    </lightning:select> </div>
+                <img aria-hidden="true" id="logo" style="height: 1%;max-width: 1.5%;margin-right: 12%;padding-top: 1.65%;" src="{!$Resource.Green_Update_Logo}" onclick="{!c.ElectronicLockBox}"  alternativeText="UpdateElectronicLockBox" > </img>                
+                
+                <div class="row slds-size_1-of-4 slds-m-right_medium">
+                    <lightning:select  name="Choose one" aura:id="Inspectorproperty" label="Add Inspector property?" value="{!v.updateInspectorproperty}"  >       
+                        <option value="">Choose one...</option> 
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                    </lightning:select> 
+                </div>
+                <img aria-hidden="true" id="logo" style="height: 1%;max-width: 1.5%;margin-right: 12%;padding-top: 1.65%;" src="{!$Resource.Green_Update_Logo}" onclick="{!c.Inspectorproperty}"  alternativeText="UpdateInspectorproperty" > </img>                              
+            </div>
+            
+            <div style="display:flex;">
+                <div class="row slds-size_1-of-4 slds-m-right_medium"> 
+                    <lightning:select  name="Preference_Type" label="Preference Type"   
+                                      aura:id="PreferenceType" value="{!v.PreferenceTypeField}">       
+                        <option value="">Choose one...</option> 
+                        <option value="Preferred">Preferred</option>
+                        <option value="Required">Required</option>
+                        <option value="Excluded">Excluded</option>
+                    </lightning:select> </div>
+                
+                <img aria-hidden="true" id="logo" style="height: 1%;max-width: 1.5%;margin-right: 12%;padding-top: 1.65%;" src="{!$Resource.Green_Update_Logo}" onclick="{!c.PreferenceTypefield}"  alternativeText="UpdatePreferenceTypefield" > </img>                              
+                
+                <div class="row slds-size_1-of-4 slds-m-right_medium">
+                    <lightning:select  name="Flag" label="Flag"  
+                                      aura:id="FlagType" value="{!v.FlagPicklist}">       
+                        <option value="">Choose one...</option> 
+                        <option value="Vacant">Vacant</option>
+                        <option value="Occupied">Occupied</option>
+                    </lightning:select> </div>
+                
+                <img aria-hidden="true" id="logo" style="height: 1%;max-width: 1.5%;margin-right: 12%;padding-top: 1.65%;" src="{!$Resource.Green_Update_Logo}" onclick="{!c.UpdateFlag}" alternativeText="UpdateFlag" > </img>                                              
+                
+            </div>   
+            
+            <br/>
+            <br/>
+            <br/>
+            <br/>
+            <div class="slds-scrollable_x" style="height:50rem;width:300rem">
+                <table class="slds-table slds-table--bordered slds-table--cell-buffer" role="grid">  
+                    
+                    <thead>  
+                        <tr class="slds-text-title--caps">
+                            <th>           
+                                <label class="slds-checkbox">
+                                    <ui:inputCheckbox value="{!v.isSelectAll}" change="{!c.handleSelectAllRecords}" aura:id="selectAll"/>
+                                    <span class="slds-checkbox--faux" />
+                                    <span class="slds-form-element__label"></span>
+                                </label>
+                            </th>  
+                           <!--  <th scope="col">
+                                <div class="slds-truncate"  > </div>
+                            </th> -->
+                             <th scope="col">
+                                <div class="slds-truncate" title="Status Flag" > Status Flag</div>
+                            </th>                            
+                            <th scope="col">
+                                <div class="slds-truncate" title="Address">Address</div>
+                            </th>
+                            <th scope="col">
+                                <div class="slds-truncate" title="Comments">Comments</div>
+                            </th>
+                            <th scope="col">
+                                <div class="slds-truncate" title="Lockbox Code">Lockbox Code</div>
+                            </th>
+                            <th scope="col">
+                                <div class="slds-truncate" title="Is this an Electronic Lock Box?">Is this an Electronic Lock Box?</div>
+                            </th>
+                            <th scope="col">
+                                <div class="slds-truncate" title="Inspector meet at property?">Inspector meet at property?</div>
+                            </th>
+                            <th scope="col">
+                                <div class="slds-truncate" title="Preference Type">Preference Type</div>
+                            </th>
+                            <th scope="col">
+                                <div class="slds-truncate" title="Service Resource">Service Resource</div>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>        
+                        <aura:iteration items="{!v.underwritingsList}" var="uw" indexVar="index">
+                            <tr>
+                                <th>
+                                    <label class="slds-checkbox">
+                                        <ui:inputCheckbox aura:id="checkRecords" value="" text="{!uw}"/>
+                                        <span class="slds-checkbox--faux" />
+                                        <span class="slds-form-element__label"></span>
+                                    </label>
+                                </th>
+                                 
+                                <td>	
+                                    <div class="slds-truncate"><lightning:select  name="Flag" label="Status Flag" required="true"  
+                                                                                 value="{!uw.Current_Status__c}" aura:id="FlagBox">       
+                                        <option value="">Choose one...</option> 
+                                        <option value="Vacant">Vacant</option>
+                                        <option value="Occupied">Occupied</option>
+                                        </lightning:select> 
+                                    </div>	
+                                     </td>           
+                              <!--  <th scope="row">
+                                    <div class="slds-truncate" >{!uw.Name}</div>
+                                </th> -->
+                                <td>
+                                    <div class="slds-truncate" >{!uw.Address__c}</div>
+                                </td>
+                                <td>
+                                    <div class="slds-truncate"><lightning:input name="Comments" required="true" value="{!uw.PAI_Comments__c}" 
+                                                                                label="Comments" aura:id="commentsID" /></div>
+                                </td>
+                                <th scope="row">
+                                    <div class="slds-truncate"><lightning:input name="LockBoxCode" required="true" value="{!uw.Lock_Box_Code__c}"
+                                                                                label="Lock Box Code" aura:id="LockBoxID" /></div>
+                                </th>
+                                <!--<td>
+                            <div class="slds-truncate"><lightning:input name="Electronic_Lock_Box" required="true" value="{!uw.Electronic_Lock_Box__c}" label="Is this an Electronic Lock Box?" /></div>
+                        </td>
+      <td>
+                            <div class="slds-truncate" ><lightning:input name="Inspector_need_to_me_someone_at_the_prop" required="true" value="{!uw.Inspector_need_to_me_someone_at_the_prop__c}" 
+       label="Does the Inspector need to meet someone at the property?" /></div>
+                        </td>-->
+                                <td >
+                                    <div class="slds-truncate"><lightning:select  name="Electronic_Lock_Box" label="Is this an Electronic Lock Box?" required="true"  
+                                                                                 value="{!uw.Electronic_Lock_Box__c}" aura:id="ElectionBox">       
+                                        <option value="">Choose one...</option> 
+                                        <option value="Yes">Yes</option>
+                                        <option value="No">No</option>
+                                        </lightning:select> 
+                                    </div>	
+                                </td>
+                                
+                                <td >
+                                    <div class="slds-truncate"> <lightning:select  name="Inspector_meet_at_property?" label="Inspector meet at property?" required="true"  
+                                                                                  aura:id="InspectorPropertyMeet" value="{!uw.Inspector_need_to_me_someone_at_the_prop__c}">       
+                                        <option value="">Choose one...</option> 
+                                        <option value="Yes">Yes</option>
+                                        <option value="No">No</option>
+                                        </lightning:select>  </div>
+                                </td>
+                                
+                                <td >
+                                    <div class="slds-truncate"> <lightning:select  name="Preference_Type" label="Preference Type" required="true"
+                                                                                  aura:id="preferenceField">       
+                                        <option value="">Choose one...</option> 
+                                        <option value="Preferred">Preferred</option>
+                                        <option value="Required">Required</option>
+                                        <option value="Excluded">Excluded</option>
+                                        </lightning:select>  </div>
+                                </td>
+                                <td>
+                                    <c:reUsableMultiSelectLookup objectAPIName="ServiceResource"
+                                                                 IconName="standard:service_resource"
+                                                                 lstSelectedRecords="{!v.selectedLookUpRecords}"
+                                                                 label="Service Resource"/>
+                                </td>
+                            </tr>
+                        </aura:iteration>
+                    </tbody>
+                </table>
+                <div >
+                    <br/>
+                    
+                    <lightning:button label="Submit" class="slds-button_brand" onclick="{!c.handleSave }"  /></div>
+            </div>
+            
+        </div>
+    </aura:if>
+</aura:component>
